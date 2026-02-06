@@ -7,6 +7,6 @@
 
 import unittest
 
-import starter
+import supranim_session
 test "can add":
   check add(5, 5) == 10

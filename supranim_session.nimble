@@ -2,11 +2,12 @@
 
 version       = "0.1.0"
 author        = "George Lemon"
-description   = "A starter project"
+description   = "Auth & Session Management for Supranim apps"
 license       = "MIT"
 srcDir        = "src"
 
 
 # Dependencies
 
-requires "nim >= 1.4.0"
+requires "nim >= 2.2.0"
+requires "libsodium"

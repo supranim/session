@@ -45,25 +45,25 @@ template postLogin*(redirectHandlerSuccess: untyped) =
       # and redirect to `/auth/login`
       userSession.notify(authErrorMessage)
       go getAuthLogin # redirects to `/auth/login`
-    withDB do:
+    withDBPool do:
       let collection =
-        Models.table("users").select
+        Models.table(Users).selectAll()
               .where("email", req.getFields[0][1]).get()
       if unlikely(collection.isEmpty):
         userSession.notify(authErrorMessage)
         go getAuthLogin # redirects to `/auth/login`
 
-      let user = collection.first()
-      if auth.checkPassword(req.getFields[1][1], user.get("password").value):
-        if likely(user.get("is_confirmed").value == "t"):
+      let user {.inject.} = collection.first()
+      if auth.checkPassword(req.getFields[1][1], user.getPassword()):
+        if likely(user.getIsConfirmed() == "t"):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data
           userSession.updatePayload(req.getClientData())
 
           # store the authenticated user session in the database
           # userSession.saveSession()
-          Models.table("user_sessions").insert({
-            "user_id": user.get("id").value,
+          Models.table(UserSessions).insert({
+            "user_id": user.getId(),
             "session_id": userSession.getId(),
             "payload": toJson(userSession.getPayload()),
             "last_access": $(userSession.getCreatedAt()),
@@ -86,13 +86,12 @@ template getLogout*(redirectHandlerSuccess: untyped) =
     if userSession.isAuthenticated():
       # we neeed an authenticated user session
       # to perform the logout
-      withDB do:
+      withDBPool do:
         # delete the user session from the database
-        assert Models.table("user_sessions").remove
-                         .where("session_id", userSession.getId())
-                         .execGet() == 1
+        Models.table(UserSessions).removeRow()
+              .where("session_id", userSession.getId())
+              .exec()
       # update client cookie with the new expiration
       # date so browser can invalidate the session
       userSession.destroy(res)
-
   go redirectHandlerSuccess

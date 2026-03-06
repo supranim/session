@@ -61,11 +61,12 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
   withSession do:
     let query = req.getQueryTable()
     if query.hasKey("token"):
-      let reqToken = query["token"]
-      withDB do:
+      let reqToken {.inject.} = query["token"]
+      withDBPool do:
         let passRequestRes =
-              Models.table("user_account_password_resets")
-                    .select.where("token", reqToken)
+              Models.table(UserAccountPasswordResets)
+                    .selectAll()
+                    .where("token", reqToken)
                     .get()
         if unlikely(passRequestRes.isEmpty):
           # if requested token is not found in the database
@@ -74,7 +75,7 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
           go getAuthForgotPassword
         else:
           let
-            expValue = passRequestRes.first().get("expires_at").value
+            expValue = passRequestRes.first().getExpiresAt()
             expiresAt: DateTime = times.parse(expValue, "yyyy-MM-dd HH:mm:sszz")
           # check if the token is expired if the token is
           # expired, notify the user and redirect to `/auth/forgot-password`
@@ -95,7 +96,7 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
 
 template postResetPassword* =
   ## Handle POST requests for resetting the password.
-  let q = req.getFieldsTable().get()
+  let q {.inject.} = req.getFieldsTable().get()
   withSession do:
     withValidator req.getFields:
       new_password: tPasswordStrength""
@@ -127,13 +128,14 @@ template postResetPassword* =
       # password reset requests from the same device used
       # to request the password reset.
       # this is useful to prevent password reset 
-    withDB do:
-      let tokenRes = Models.table("user_account_password_resets")
-                          .select.where("token", q["token"]).get()
+    withDBPool do:
+      let tokenRes = Models.table(UserAccountPasswordResets)
+                          .selectAll()
+                          .where("token", q["token"]).get()
       if not tokenRes.isEmpty:
         let
           token = tokenRes.first()
-          expValue = token.get("expires_at").value
+          expValue = token.getExpiresAt()
           expiresAt: DateTime = times.parse(expValue, "yyyy-MM-dd HH:mm:sszz")
 
         if now() >= expiresAt:
@@ -143,12 +145,14 @@ template postResetPassword* =
           go getAuthForgotPassword # redirects to `/auth/forgot-password`
 
         # update the password in the database
-        Models.table("users").update("password", auth.hashPassword(q["new_password"]))
-                             .where("id", token.get("user_id").value).exec()
+        Models.table(Users).update({
+            "password": auth.hashPassword(q["new_password"])
+          }).where("id", token.getUserId().value).exec()
 
         # delete the password reset token from the database
-        assert Models.table("user_account_password_resets")
-                     .remove.where("token", q["token"]).execGet() == 1
+        Models.table(UserAccountPasswordResets)
+              .removeRow()
+              .where("token", q["token"]).exec()
 
         # update the password in the database
         userSession.notify("Password has been updated", some("/auth/login"))

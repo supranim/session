@@ -12,7 +12,7 @@ import pkg/libsodium/[sodium, sodium_sizes]
 initService HttpSession[Singleton]:
   # config -> ConfigHttpSession
   backend do:
-    import std/[times, strutils, json, tables, hashes]
+    import std/[times, json, tables, hashes]
     import pkg/supranim/support/[cookie, nanoid]
     export cookie
 
@@ -114,12 +114,13 @@ initService HttpSession[Singleton]:
           # any payload related to the current user session.
         rememberToken: string
           # generated when user checks the `remember me`
-          # checkbox to keep it logged in
+          # checkbox to keep it logged in until they log out or the session is deleted by the server.
         csrfSecretKey: string
-          # a random string that is used to generate the CSRF
+          # A secret key used to generate CSRF tokens. This key is unique for each
+          # session and is used to create HMAC-based CSRF tokens.
         csrfTokens: Table[CSRFFormIdentifier, string]
-          # a table that holds the CSRF tokens for the session
-          # this is used to validate the authenticity of the request
+          # a table that holds the generated CSRF tokens for each form identifier. 
+          # this is used to validate the CSRF token when the form is submitted.
 
       Sessions = Table[string, UserSession]
 
@@ -130,8 +131,12 @@ initService HttpSession[Singleton]:
       HttpSession = object
         keypair: string
         nonce: string
+          # A unique nonce used for encrypting and decrypting session
+          # data when using file storage. This should be generated once and stored securely.
         storageType: SessionStorageType
+          # The storage type for the sessions. This can be either `sessionDBStorage` or `sessionFileStorage`.
         sessions: Sessions = Sessions()
+          # A table that holds all the active user sessions. The key is the session id.
       
       HttpSessionError* = object of CatchableError
 
@@ -159,6 +164,20 @@ initService HttpSession[Singleton]:
       result.client["ssid"] = newCookie("ssid", id)
       instance.sessions[id] = result # store the user session
 
+    proc addUserSessionWith(instance: ptr HttpSession,
+          id: string, createdAt: DateTime, userData: JsonNode) =
+      ## Creates a new session object with a custom id and createdAt time
+      assert userData.kind == JObject
+      let userSession = UserSession(
+        id: id,
+        created: createdAt,
+        lastAccess: createdAt,
+        csrfSecretKey: nanoid.generate(size = crypto_auth_hmacsha256_keybytes()),
+        payload: userData
+      )
+      userSession.client["ssid"] = newCookie("ssid", id)
+      instance[].sessions[id] = userSession
+
   client do:
     import pkg/[enimsql, jsony]
     from pkg/supranim/http/request import Request, getClientData, getUriPath
@@ -182,7 +201,7 @@ initService HttpSession[Singleton]:
         if instance.sessions.hasKey(ssid.get()):
           return instance.sessions[ssid.get()]
 
-    proc getId*(userSession: UserSession): string =
+    proc getId*(userSession: UserSession): lent string =
       ## Returns the session id
       result = userSession.id
 
@@ -211,6 +230,10 @@ initService HttpSession[Singleton]:
       res.addHeader("set-cookie", $userCookie)
     
     proc checkAuthenticity*(userSession: UserSession, reqPayload: JsonNode): bool =
+      ## Checks if the session payload matches the request payload. This is a basic check
+      ## to prevent session hijacking by comparing the session payload with the client data
+      ## of the request. The session will be considered authentic if all the key-value
+      ## pairs in the session payload match the corresponding key-value pairs in the request payload.
       for k, v in userSession.payload:
         if likely(reqPayload.hasKey(k)):
           if likely(hash(v.getStr()) == hash(reqPayload[k].getStr)):
@@ -246,12 +269,13 @@ initService HttpSession[Singleton]:
       withDB do:
         result = userSession.payload != nil
         if result:
-          let anySessions = Models.table("user_sessions").select
+          let anySessions = Models.table("user_sessions").select()
                                   .where("session_id", userSession.id).get()
           result = anySessions.isEmpty() == false
           if result:
             let storedSession = anySessions.first()
             let storedPayload = fromJson(storedSession.get("payload").value)
+            # todo check if the session has expired based on the created_at time in the database
             for k, v in storedPayload:
               if likely(userSession.payload.hasKey(k)):
                 if likely(hash(v.getStr) == hash(userSession.payload[k].getStr)):
@@ -289,31 +313,21 @@ initService HttpSession[Singleton]:
         withDB do:
           let anySessions = Models.table("user_sessions").select.getAll()
           for s in anySessions:
-            let payload = fromJson(s.get("payload").value)
-            let id = s.get("session_id").value
             try:
+              let payload = fromJson(s.get("payload").value)
+              let id = s.get("session_id").value
               let createdAt = parse(s.get("created_at").value, "yyyy-MM-dd HH:mm:sszz")
-              
-              # if createdAt + instance.expiration <= now() and 
-              #   # check if the session `createdAt` is expired
-              #   # if expired, skip loading this session
-              #   # todo the user_session db model should have a `last_access` field
-              #   continue
-
-              let userSession = UserSession(
-                id: id,
-                created: createdAt,
-                lastAccess: createdAt,
-                csrfSecretKey: nanoid.generate(size = crypto_auth_hmacsha256_keybytes()),
-                payload: %*{
+              # if the session has expired, skip it and let the SessionCleaner process handle it
+              if now() - createdAt > initDuration(days = 30): continue
+              addUserSessionWith(instance, id, createdAt, %*{
                   "ip": payload["ip"],
                   "platform": payload["platform"],
                   "agent": payload["agent"],
                   "sec-ch-ua": payload["sec-ch-ua"]
-                }
-              )
-              userSession.client["ssid"] = newCookie("ssid", id)
-              instance[].sessions[id] = userSession
+                })
+            except JsonParsingError as e:
+              echo e.msg # todo log the error somewhere and
+              continue
             except TimeParseError as e:
               echo e.msg # todo log the error somewhere and
               continue
@@ -343,12 +357,17 @@ initService HttpSession[Singleton]:
     # CSRF handlers
     #
     proc genCSRF*(userSession: UserSession, id: string): string =
-      ## Generates a new CSRF token.
+      ## Generates a new CSRF token for the given form identifier and stores it in the session's `csrfTokens` table.
+      ## The CSRF token is generated using HMAC-SHA256 with a unique secret key for each session.
+      ## 
+      ## The generated token is stored in the `csrfTokens` table with the form identifier as the key.
+      ## This allows for validating the token when the form is submitted.
       result = bin2hex(crypto_auth_hmacsha256(nanoid.generate(size = 8), userSession.csrfSecretKey))
       userSession.csrfTokens[id] = result
 
     proc validateCSRF*(userSession: UserSession, id, clientToken: string): bool =
-      ## Validates the CSRF token
+      ## Validates the CSRF token submitted by the client against the token stored in the session
+      ## for the given form identifier.
       if userSession.csrfTokens.hasKey(id) and userSession.csrfTokens[id] == clientToken:
         userSession.csrfTokens.del(id) # not needed anymore
         result = true

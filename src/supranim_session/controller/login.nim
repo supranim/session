@@ -48,7 +48,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
     withDBPool do:
       let collection =
         Models.table(Users).selectAll()
-              .where("email", req.getFields[0][1]).get()
+              .where("email", req.getFields[0][1]).getAll()
       if unlikely(collection.isEmpty):
         userSession.notify(authErrorMessage)
         go getAuthLogin # redirects to `/auth/login`

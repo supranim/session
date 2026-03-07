@@ -67,7 +67,7 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
               Models.table(UserAccountPasswordResets)
                     .selectAll()
                     .where("token", reqToken)
-                    .get()
+                    .getAll()
         if unlikely(passRequestRes.isEmpty):
           # if requested token is not found in the database
           # notify the user and redirect to `/auth/forgot-password`
@@ -131,7 +131,7 @@ template postResetPassword* =
     withDBPool do:
       let tokenRes = Models.table(UserAccountPasswordResets)
                           .selectAll()
-                          .where("token", q["token"]).get()
+                          .where("token", q["token"]).getAll()
       if not tokenRes.isEmpty:
         let
           token = tokenRes.first()

@@ -59,16 +59,8 @@ template postLogin*(redirectHandlerSuccess: untyped) =
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data
           userSession.updatePayload(req.getClientData())
-
           # store the authenticated user session in the database
-          # userSession.saveSession()
-          Models.table(UserSessions).insert({
-            "user_id": user.getId(),
-            "session_id": userSession.getId(),
-            "payload": toJson(userSession.getPayload()),
-            "last_access": $(userSession.getCreatedAt()),
-            "created_at": $(userSession.getCreatedAt())
-          }).exec()
+          userSession.saveSession()
         else:
           # if the user is not confirmed, notify the user
           # and redirect to `/auth/login`

@@ -96,8 +96,8 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
 
 template postResetPassword* =
   ## Handle POST requests for resetting the password.
-  let q {.inject.} = req.getFieldsTable().get()
   withSession do:
+    let q {.inject.} = req.getFieldsTable().get()
     withValidator req.getFields:
       new_password: tPasswordStrength""
         # a strong password is required
@@ -123,18 +123,13 @@ template postResetPassword* =
       else:
         go getAuthForgotPassword # redirects to `/auth/forgot-password`
     
-    # when staticConfig("session.authentication.reset_password.require_same_device"):
-      # when enabled, it will only allow
-      # password reset requests from the same device used
-      # to request the password reset.
-      # this is useful to prevent password reset 
     withDBPool do:
       let tokenRes = Models.table(UserAccountPasswordResets)
                           .selectAll()
                           .where("token", q["token"]).getAll()
       if not tokenRes.isEmpty:
         let
-          token = tokenRes.first()
+          token {.inject.} = tokenRes.first()
           expValue = token.getExpiresAt()
           expiresAt: DateTime = times.parse(expValue, "yyyy-MM-dd HH:mm:sszz")
 
@@ -147,12 +142,13 @@ template postResetPassword* =
         # update the password in the database
         Models.table(Users).update({
             "password": auth.hashPassword(q["new_password"])
-          }).where("id", token.getUserId().value).exec()
+          }).where("id", token.getUserId()
+          ).exec()
 
         # delete the password reset token from the database
         Models.table(UserAccountPasswordResets)
               .removeRow()
-              .where("token", q["token"]).exec()
+              .where("token", token.getToken()).exec()
 
         # update the password in the database
         userSession.notify("Password has been updated", some("/auth/login"))

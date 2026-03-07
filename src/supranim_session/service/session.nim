@@ -346,15 +346,20 @@ initService HttpSession[Singleton]:
       ## Retrieve the session payload
       result = userSession.payload
 
-    proc saveSession*(userSession: UserSessionObj) =
+    template saveSession*(userSession: UserSessionObj) =
       ## Saves the current session to the database.
+      Models.table(UserSessions).insert({
+        "user_id": userSession.getAuthUserId().get(""),
+        "session_id": userSession.getId(),
+        "payload": toJson(userSession.getPayload()),
+        "last_access": $(userSession.getCreatedAt()),
+        "created_at": $(userSession.getCreatedAt())
+      }).exec()
+
+    proc saveSessionWithPool*(userSession: UserSessionObj) =
+      ## Saves the current session to the database using a connection pool.
       withDBPool do:
-        Models.table(UserSessions).insert({
-          "user_id": userSession.getAuthUserId().get(""),
-          "session_id": userSession.getId(),
-          "payload": toJson(userSession.getPayload()),
-          "created_at": $(userSession.getCreatedAt())
-        }).exec()
+        userSession.saveSession()
 
     #
     # CSRF handlers

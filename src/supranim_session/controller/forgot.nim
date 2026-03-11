@@ -42,7 +42,7 @@ template postForgotPassword*(redirectHandlerSuccess: untyped) =
     # emit `account.request.reset` event to handle the
     # password reset request. this event is spawned in a new thread
     # to avoid blocking the request.
-    events.emitter("account.password.request", some(@[req.getFields[0][1]]))
+    event().emit("account.password.request", some(@[req.getFields[0][1]]))
 
     # notify the user that a reset password link has been
     # sent to the given email address. Same message is used
@@ -149,7 +149,6 @@ template postResetPassword* =
         Models.table(UserAccountPasswordResets)
               .removeRow()
               .where("token", token.getToken()).exec()
-
         # update the password in the database
         userSession.notify("Password has been updated", some("/auth/login"))
 

@@ -28,7 +28,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
     if userSession.isAuthenticated():
       # if the user is already authenticated
       # redirect to the account page
-      go redirectHandlerSuccess # redirects to `/account`
+      go redirectHandlerSuccess # redirects to selected controller action
 
     bag req.getFields:
       # validates the request fields
@@ -39,7 +39,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
       password: tPassword""
       csrf -> callback do(input: string) -> bool:
         # validate the CSRF token required for authentication
-        return userSession.validateCSRF("/auth/login", input)
+        result = userSession.validateCSRF("/auth/login", input)
     do:
       # validation failed, let's notify the user
       # and redirect to `/auth/login`
@@ -49,6 +49,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
       let collection =
         Models.table(Users).selectAll()
               .where("email", req.getFields[0][1]).getAll()
+
       if unlikely(collection.isEmpty):
         userSession.notify(authErrorMessage)
         go getAuthLogin # redirects to `/auth/login`
@@ -58,19 +59,31 @@ template postLogin*(redirectHandlerSuccess: untyped) =
         if likely(user.getIsConfirmed() == "t"):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data
+          if session().config.authentication.enableMultipleSessions == false:
+            # check if only one session is allowed per user, if so,
+            # it will prevent the user from logging if they have an active session
+            let activeSession = Models.table(UserSessions)
+                                      .selectAll()
+                                      .where("user_id", user.getId())
+                                      .getAll()
+            if not activeSession.isEmpty:
+              userSession.notify("You have an active session. Please log out from other devices or wait until the session expires.")
+              go getAuthLogin # redirects to `/auth/login`
+
           userSession.updatePayload(req.getClientData())
           # store the authenticated user session in the database
-          userSession.saveSession()
+          saveSession(user.getId(), userSession)
+          go redirectHandlerSuccess # redirects to selected controller action
         else:
           # if the user is not confirmed, notify the user
           # and redirect to `/auth/login`
           userSession.notify("Your account is not confirmed. Check your email inbox or spam folder.")
-          go redirectHandlerSuccess # redirects to `/account`
+          go getAuthLogin
     
     # authentication failed, we'll use the same
     # error message to prevent email enumeration attacks
     userSession.notify(authErrorMessage)
-  go redirectHandlerSuccess # redirects to `/account`
+  go getAuthLogin
 
 template getLogout*(redirectHandlerSuccess: untyped) =
   ## GET handle to destroy user sessions

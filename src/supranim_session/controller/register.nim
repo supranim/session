@@ -43,7 +43,7 @@ template postRegister* =
     # emit `account.register` event to handle the
     # registration request. this event is spawned in a new thread
     # to avoid blocking the request.
-    events.emitter("account.register", some(@[req.getFields[0][1], req.getFields[1][1]]))
+    event().emit("account.register", some(@[req.getFields[0][1], req.getFields[1][1]]))
 
     # notify the user that the account has been created
     # and a confirmation link has been sent to the given email address.

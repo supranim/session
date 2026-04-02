@@ -1,3 +1,11 @@
+# A Service provider for managing HTTP Sessions
+# in a Supranim application.
+#
+#   (c) 2025 George Lemon / Made by Humans from OpenPeeps
+#   https://supranim.com | https://github.com/supranim
+#   
+#   Released under the MIT License.
+
 import pkg/supranim/model
 
 #
@@ -13,6 +21,7 @@ newModel Users:
   password {.notnull.}: Text
   pk {.notnull.}: Text
   sk {.notnull.}: Text
+  totp_secret: Text
   is_confirmed {.notnull.}: Boolean = false
   custom_fields: Jsonb
   created_at: TimestampTz
@@ -67,7 +76,6 @@ newModel UserSessions:
 
 #
 # user_roles
-# https://drawsql.app/templates/laravel-permission
 #
 newModel UserRoles:
   # This model is used to store the

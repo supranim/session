@@ -7,7 +7,7 @@
 #   Released under the MIT License.
 
 import pkg/supranim/core/[services, paths]
-import pkg/libsodium/[sodium, sodium_sizes]
+import pkg/e2ee
 
 initService HttpSession[Singleton]:
   backend do:
@@ -170,7 +170,7 @@ initService HttpSession[Singleton]:
         id: id,
         created: createdAt,
         lastAccess: createdAt,
-        csrfSecretKey: nanoid.generate(size = crypto_auth_hmacsha256_keybytes()),
+        csrfSecretKey: nanoid.generate(size = 32),
         payload: userData
       )
       # result.backend["ssid"] = newCookie("ssid", $(userData), createdAt + 60.minutes)
@@ -185,7 +185,7 @@ initService HttpSession[Singleton]:
         id: id,
         created: createdAt,
         lastAccess: createdAt,
-        csrfSecretKey: nanoid.generate(size = crypto_auth_hmacsha256_keybytes()),
+        csrfSecretKey: nanoid.generate(size = 32),
         payload: userData
       )
       userSession.client["ssid"] = newCookie("ssid", id)
@@ -415,7 +415,7 @@ initService HttpSession[Singleton]:
       ## 
       ## The generated token is stored in the `csrfTokens` table with the form identifier as the key.
       ## This allows for validating the token when the form is submitted.
-      result = bin2hex(crypto_auth_hmacsha256(nanoid.generate(size = 8), userSession.csrfSecretKey))
+      result = sha512HmacHex(userSession.csrfSecretKey, nanoid.generate(size = 8))
       userSession.csrfTokens[id] = result
 
     proc validateCSRF*(userSession: UserSessionObj, id, clientToken: string): bool =

@@ -11,7 +11,7 @@ import pkg/e2ee
 
 initService HttpSession[Singleton]:
   backend do:
-    import std/[times, json, tables, hashes]
+    import std/[times, json, tables, hashes, strutils]
     import pkg/supranim/support/[cookie, nanoid]
     export cookie
 
@@ -192,7 +192,7 @@ initService HttpSession[Singleton]:
       instance[].sessions[id] = userSession
 
   client do:
-    import pkg/[ozark, jsony]
+    import pkg/[ozark, openparser/json]
     from pkg/supranim/core/request import Request, getClientData, getUriPath
     from pkg/supranim/core/response import Response, addHeader
     from pkg/supranim/controller import getClientId, getSessionCookie
@@ -312,9 +312,8 @@ initService HttpSession[Singleton]:
               code # execute code block with database connection and user session
 
     proc isAuthenticated*(userSession: UserSessionObj): bool =
-      ## Determine if the user is authenticated by
-      ## performing a database query to check if the session
-      ## is valid.
+      ## Determine if the user is authenticated by performing a database
+      ## query to check if the session is valid.
       withDBPool do:
         result = userSession.payload != nil
         if result:
@@ -332,9 +331,8 @@ initService HttpSession[Singleton]:
             return userSession.payload.checkPayload(storedPayload)
     
     proc isAuthenticated*(req: var Request, res: var Response): bool =
-      ## Determine if the user is authenticated by
-      ## performing a database query to check if the session
-      ## is valid.
+      ## Determine if the user is authenticated by performing a database
+      ## query to check if the session is valid.
       withSession do:
         result = userSession.isAuthenticated()
 
@@ -415,7 +413,7 @@ initService HttpSession[Singleton]:
       ## 
       ## The generated token is stored in the `csrfTokens` table with the form identifier as the key.
       ## This allows for validating the token when the form is submitted.
-      result = sha512HmacHex(userSession.csrfSecretKey, nanoid.generate(size = 8))
+      result = toLowerAscii(sha512HmacHex(userSession.csrfSecretKey, nanoid.generate(size = 8)))
       userSession.csrfTokens[id] = result
 
     proc validateCSRF*(userSession: UserSessionObj, id, clientToken: string): bool =

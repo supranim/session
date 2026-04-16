@@ -21,6 +21,8 @@ newModel Users:
   password {.notnull.}: Text
   pk {.notnull.}: Text
   sk {.notnull.}: Text
+  sign_pk {.notnull.}: Text
+  sign_sk {.notnull.}: Text
   totp_secret: Text
   is_confirmed {.notnull.}: Boolean = false
   custom_fields: Jsonb

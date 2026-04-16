@@ -55,7 +55,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
         go getAuthLogin # redirects to `/auth/login`
 
       let user {.inject.} = collection.first()
-      if auth.checkPassword(req.getFields[1][1], user.getPassword()):
+      if e2ee.verifyPassword(req.getFields[1][1], user.getPassword()):
         if likely(user.getIsConfirmed() == "t"):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data

@@ -7,7 +7,7 @@ on:
       - main
 env:
   nim-version: 'stable'
-  nim-src: src/supranim_${{ github.event.repository.name }}.nim
+  nim-src: src/supranim_${{ github.event.repository.name }}
   deploy-dir: .gh-pages
 jobs:
   docs:
@@ -18,7 +18,7 @@ jobs:
         with:
           nim-version: ${{ env.nim-version }}
       - run: nimble install -Y
-      - run: nim doc --index:on --project --path:. --out:${{ env.deploy-dir }} ${{ env.nim-src }}
+      - run: nim doc --index:on --project --path:. --out:${{ env.deploy-dir }} ${{ env.nim-src }}.nim
       
       - name: "Rename to index.html"
         run: mv ${{ env.deploy-dir }}/${{ env.nim-src }}.html ${{ env.deploy-dir }}/index.html 

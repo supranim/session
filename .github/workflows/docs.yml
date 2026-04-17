@@ -7,6 +7,7 @@ on:
       - main
 env:
   nim-version: 'stable'
+  module-name: '${{ github.event.repository.name }}'
   nim-src: src/supranim_${{ github.event.repository.name }}
   deploy-dir: .gh-pages
 jobs:
@@ -21,13 +22,13 @@ jobs:
       - run: nim doc --index:on --project --path:. --out:${{ env.deploy-dir }} ${{ env.nim-src }}.nim
       
       - name: "Rename to index.html"
-        run: mv ${{ env.deploy-dir }}/${{ env.nim-src }}.html ${{ env.deploy-dir }}/index.html 
+        run: mv ${{ env.deploy-dir }}/${{ env.module-name }}.html ${{ env.deploy-dir }}/index.html 
       
       - name: "Find and replace (index.html)"
-        run: sed -i 's/${{ env.nim-src }}.html/index.html/g' ${{ env.deploy-dir }}/index.html
+        run: sed -i 's/${{ env.module-name }}.html/index.html/g' ${{ env.deploy-dir }}/index.html
       
       - name: "Find and replace (theindex.html)"
-        run: sed -i 's/${{ env.nim-src }}.html/index.html/g' ${{ env.deploy-dir }}/theindex.html
+        run: sed -i 's/${{ env.module-name }}.html/index.html/g' ${{ env.deploy-dir }}/theindex.html
         
       - name: Deploy documents
         uses: peaceiris/actions-gh-pages@v3

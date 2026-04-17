@@ -1,0 +1,32 @@
+name: test
+on:
+  push:
+    paths-ignore:
+      - LICENSE
+      - README.*
+      - examples
+      - .github/workflows
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - README.*
+      - examples
+      - .github/workflows
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nim-version:
+          - 'stable'
+    steps:
+      - uses: actions/checkout@v3
+      - uses: jiro4989/setup-nim-action@v1
+        with:
+          nim-version: ${{ matrix.nim-version }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nimble install https://github.com/georgelemon/parsesql@#vgelemon # temporary workaround until the PR is merged?
+      - run: nimble install https://github.com/georgelemon/db_connector@#pr_instant_rows_cols_prepared # temporary workaround until the PR is merged?
+      - run: nimble install -Y
+      - run: nim c -r src/supranim_${{ github.event.repository.name }}.nim
+      - run: nimble test

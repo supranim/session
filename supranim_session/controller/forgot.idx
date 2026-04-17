@@ -1,0 +1,6 @@
+nimTitle	forgot	supranim_session/controller/forgot.html	module supranim_session/controller/forgot		0
+nim	forgotPasswordSubmitMessage	supranim_session/controller/forgot.html#forgotPasswordSubmitMessage	const forgotPasswordSubmitMessage		9
+nim	getForgotPassword	supranim_session/controller/forgot.html#getForgotPassword.t,untyped,string	template getForgotPassword(redirectHandlerSuccess: untyped; layout = "base")		12
+nim	postForgotPassword	supranim_session/controller/forgot.html#postForgotPassword.t,untyped	template postForgotPassword(redirectHandlerSuccess: untyped)		22
+nim	getResetPassword	supranim_session/controller/forgot.html#getResetPassword.t,untyped,string	template getResetPassword(redirectHandlerSuccess: untyped; layout = "base")		56
+nim	postResetPassword	supranim_session/controller/forgot.html#postResetPassword.t	template postResetPassword()		97

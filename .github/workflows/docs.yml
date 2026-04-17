@@ -7,7 +7,7 @@ on:
       - main
 env:
   nim-version: 'stable'
-  module-name: '${{ github.event.repository.name }}'
+  module-name: 'supranim_${{ github.event.repository.name }}'
   nim-src: src/supranim_${{ github.event.repository.name }}
   deploy-dir: .gh-pages
 jobs:

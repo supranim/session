@@ -21,13 +21,13 @@ jobs:
       - run: nim doc --index:on --project --path:. --out:${{ env.deploy-dir }} ${{ env.nim-src }}
       
       - name: "Rename to index.html"
-        run: mv ${{ env.deploy-dir }}/${{ github.event.repository.name }}.html ${{ env.deploy-dir }}/index.html 
+        run: mv ${{ env.deploy-dir }}/${{ env.nim-src }}.html ${{ env.deploy-dir }}/index.html 
       
       - name: "Find and replace (index.html)"
-        run: sed -i 's/${{ github.event.repository.name }}.html/index.html/g' ${{ env.deploy-dir }}/index.html
+        run: sed -i 's/${{ env.nim-src }}.html/index.html/g' ${{ env.deploy-dir }}/index.html
       
       - name: "Find and replace (theindex.html)"
-        run: sed -i 's/${{ github.event.repository.name }}.html/index.html/g' ${{ env.deploy-dir }}/theindex.html
+        run: sed -i 's/${{ env.nim-src }}.html/index.html/g' ${{ env.deploy-dir }}/theindex.html
         
       - name: Deploy documents
         uses: peaceiris/actions-gh-pages@v3

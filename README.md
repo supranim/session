@@ -1,6 +1,7 @@
 <p align="center">
   Auth & Session Management for Supranim applications.<br>
-  Login/Register/Logout &bullet; Cookie-based sessions &bullet; Flash messages &bullet; CSRF protection &bullet; Session cleanup &bullet;
+  Login/Register/Logout &bullet; Cookie-based sessions &bullet;<br>
+  Flash messages &bullet; CSRF protection &bullet; Session cleanup
 </p>
 
 <p align="center">

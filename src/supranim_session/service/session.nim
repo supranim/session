@@ -198,7 +198,13 @@ initService HttpSession[Singleton]:
       instance[].sessions[id] = userSession
 
   client do:
-    import pkg/[ozark, openparser/json]
+    import pkg/openparser/json
+    
+    when defined supraDBMainSqlite:
+      import pkg/ozark/driver/sqlite
+    else:
+      import pkg/ozark/driver/psql
+
     from pkg/supranim/core/request import Request, getClientData, getUriPath
     from pkg/supranim/core/response import Response, addHeader
     from pkg/supranim/controller import getClientId, getSessionCookie

@@ -56,7 +56,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
 
       let user {.inject.} = collection.first()
       if e2ee.verifyPassword(req.getFields[1][1], user.getPassword()):
-        if likely(user.getIsConfirmed() == "t"):
+        if likely(fromDBValue[bool](user.getIsConfirmed())):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data
           if session().config.authentication.enableMultipleSessions == false:

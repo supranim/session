@@ -1,29 +1,17 @@
-# A Service provider for managing HTTP Sessions
-# in a Supranim application.
-#
-#   (c) 2025 George Lemon / Made by Humans from OpenPeeps
-#   https://supranim.com | https://github.com/supranim
-#   
-#   Released under the MIT License.
-
-# This is a copy-to-your-project module that contains event listeners
-# for handling account related events such as registration and password reset.
-#
-# We are using the event system to decouple the logic for handling account
-# related operations from the HTTP request handlers. This allows us to
-# keep our code organized and maintainable.
-#
 import std/[options, tables, times, strformat, json, os, strutils]
 
-import pkg/[ozark, twofa]
+import pkg/[twofa, openparser/yaml]
 import pkg/kapsis/interactive/prompts
 
 import pkg/supranim/service/events
 import pkg/supranim/support/[url, auth, nanoid]
 
-import ../../provider/db
+when defined supraDBMainSqlite:
+  import pkg/ozark/driver/sqlite
+else:
+  import pkg/ozark/driver/psql
 
-from pkg/supranim/application import appInstance, config
+from pkg/supranim/application import AppInstance, config
 
 listener "account.password.request":
   ## Event listener for requesting a password reset
@@ -54,8 +42,7 @@ listener "account.password.request":
         for anyPassReq in anyPassRequests:
           # todo enimsql must be able to automatically
           # parse columns with DateTime type
-          let expValue = anyPassReq.getExpiresAt()
-          let expiresAt: DateTime = times.parse(expValue, "yyyy-MM-dd HH:mm:sszz")
+          let expiresAt: DateTime = fromDbValue[DateTime](anyPassReq.getExpiresAt())
       
           if expiresAt > now():
             # the already generated password reset link is still valid
@@ -79,7 +66,7 @@ listener "account.password.request":
         signature = sign(secretKeyFromHex(user.getSk()), rawToken).toHex()
         token = fmt"{rawToken}:{signature}"
         # token = boxEncrypt(boxRandomBytes().bin2hex, user.getPk(), user.getSk())
-        expInterval = appInstance().config("session.settings.expiration_time").getInt
+        expInterval = AppInstance().config("session.settings.expiration_time").getInt
         # default expiration time is 60 minutes.
         # use `config/session.expiration` to customize the expiration time
 

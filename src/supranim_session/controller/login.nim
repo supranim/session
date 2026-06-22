@@ -6,6 +6,9 @@
 #   
 #   Released under the MIT License.
 
+import pkg/e2ee
+from pkg/ozark/driver/psql import fromDBValue
+
 template getLogin*(redirectHandlerAlreadyLoggedin: untyped, layout="base") =
   ## renders authentication page
   withSession do:
@@ -15,7 +18,7 @@ template getLogin*(redirectHandlerAlreadyLoggedin: untyped, layout="base") =
       go redirectHandlerAlreadyLoggedin
     else:
       render("auth/login", layout, local = &*{
-        "notifications": userSession.getNotifications(req.getUriPath).get(@[]),
+        "notifications": userSession.getNotifications(req.getUriPath),
         "csrf": userSession.genCSRF("/auth/login")
       })
 
@@ -46,16 +49,17 @@ template postLogin*(redirectHandlerSuccess: untyped) =
       userSession.notify(authErrorMessage)
       go getAuthLogin # redirects to `/auth/login`
     withDBPool do:
+      let fields = req.getFieldsTable().get()
       let collection =
         Models.table(Users).selectAll()
-              .where("email", req.getFields[0][1]).getAll()
+              .where("email", fields["email"]).getAll()
 
       if unlikely(collection.isEmpty):
         userSession.notify(authErrorMessage)
         go getAuthLogin # redirects to `/auth/login`
 
       let user {.inject.} = collection.first()
-      if e2ee.verifyPassword(req.getFields[1][1], user.getPassword()):
+      if e2ee.verifyPassword(fields["password"], user.getPassword()):
         if likely(fromDBValue[bool](user.getIsConfirmed())):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data
@@ -73,6 +77,8 @@ template postLogin*(redirectHandlerSuccess: untyped) =
           userSession.updatePayload(req.getClientData())
           # store the authenticated user session in the database
           saveSession(user.getId(), userSession)
+          # regenerate session ID to prevent session fixation attacks
+          userSession.renewSession(res)
           go redirectHandlerSuccess # redirects to selected controller action
         else:
           # if the user is not confirmed, notify the user

@@ -87,14 +87,12 @@ initService HttpSession[Singleton]:
         # CSRF token is associated with. Usually
         # this is the form action URL.
 
-      UserSessionType = enum
+      UserSessionType* = enum
         sessionTypeDefault
-          # A temporary session that will be
-          # deleted after a certain time
+          ## A temporary session that will be deleted after a certain time
         sessionTypeRememberMe
-          # A session that will be preserved
-          # until the user logs out or the session
-          # is deleted by the server.
+          ## A session that will be preserved until the user logs out or the session
+          ## is deleted by the server.
 
       UserSessionObj* = ref object
         `type`: UserSessionType
@@ -364,6 +362,37 @@ initService HttpSession[Singleton]:
       ## Returns the session created at time
       userSession.created
 
+    proc getLastAccess*(userSession: UserSessionObj): DateTime =
+      ## Returns the session last access time
+      userSession.lastAccess
+
+    proc getType*(userSession: UserSessionObj): UserSessionType =
+      ## Returns the session type (default or remember-me)
+      userSession.`type`
+
+    proc isExpired*(userSession: UserSessionObj): bool =
+      ## Returns true if the session has exceeded its configured expiration duration
+      let instance = session()
+      result = now() - userSession.created > instance[].config.expiration
+
+    proc renewSession*(userSession: UserSessionObj, res: var Response) =
+      ## Regenerates the session ID for a remember-me session.
+      ## This should be called after successful authentication to prevent session fixation.
+      if userSession.`type` != sessionTypeRememberMe:
+        return
+      let instance = session()
+      var newId: string
+      while true:
+        newId = nanoid.generate(size = 42)
+        if not instance[].sessions.hasKey(newId): break
+      let oldId = userSession.id
+      userSession.id = newId
+      userSession.client["ssid"] = newCookie("ssid", newId,
+        expirationDate = some(userSession.created + instance[].config.expiration))
+      instance[].sessions.del(oldId)
+      instance[].sessions[newId] = userSession
+      res.addHeader("set-cookie", $userSession.client["ssid"])
+
     proc initSavedSessions*(instance: ptr HttpSession) =
       ## Initializes the HttpSession service with saved sessions
       ## from the database.
@@ -451,7 +480,7 @@ initService HttpSession[Singleton]:
             instance.sessions[ssid].notifications[path] = newSeq[Notification]()
           instance.sessions[ssid].notifications[path].add(msg)
 
-    proc getNotifications*(userSession: UserSessionObj, path: string): Option[seq[string]] =
+    proc getSomeNotifications*(userSession: UserSessionObj, path: string): Option[seq[string]] =
       ## Returns available flash bag notifications.
       if userSession != nil:
         let ssid = userSession.getId
@@ -462,3 +491,14 @@ initService HttpSession[Singleton]:
               instance.sessions[ssid].notifications.del(path)
             return some(instance.sessions[ssid].notifications[path])
       none(seq[string])
+
+    proc getNotifications*(userSession: UserSessionObj, path: string): seq[string] =
+      ## Returns available flash bag notifications.
+      if userSession != nil:
+        let ssid = userSession.getId
+        let instance = session()
+        if instance.sessions.hasKey(ssid):
+          if instance.sessions[ssid].notifications.hasKey(path):
+            defer:
+              instance.sessions[ssid].notifications.del(path)
+            return instance.sessions[ssid].notifications[path]

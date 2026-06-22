@@ -72,6 +72,10 @@ newModel UserSessions:
   user_id {.notnull.}: Users.id
   session_id {.notnull.}: Varchar(255)
   payload {.notnull.}: JSON
+  session_type {.notnull.}: Varchar(50)
+    # The session type: "default" or "remember_me"
+  remember_token: Varchar(255)
+    # Optional remember-me token for long-lived sessions
   created_at {.notnull.}: TimestampTz
   last_access {.notnull.}: TimestampTz
 

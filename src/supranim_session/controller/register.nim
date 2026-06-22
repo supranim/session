@@ -9,8 +9,11 @@
 template getRegister*(layout = "base") =
   ## GET handle for rendering the registration page
   withSession do:
+    if unlikely(isAuth()):
+      # already logged in, redirect to account page
+      go getAccount
     render("auth.register", layout, local = &*{
-      "notifications": userSession.getNotifications(req.getUriPath).get(@[]),
+      "notifications": userSession.getNotifications(req.getUriPath),
       "csrf": userSession.genCSRF("/auth/register")
     })
 
@@ -19,6 +22,12 @@ template postRegister* =
   ## POST handle for registering a new user
   let q {.inject.} = req.getFieldsTable().get()
   withSession do:
+    if unlikely(isAuth()):
+      # already logged in, redirect to account page
+      go getAccount
+    if not session().config.registration.enable:
+      userSession.notify("Registration is currently disabled.")
+      go getAuthLogin
     withValidator req.getFields:
       email: tEmail""
       password: tPasswordStrength""
@@ -26,6 +35,9 @@ template postRegister* =
       password_confirm -> callback do(input: string) -> bool:
         # ensure the password matches the confirmation password
         q["password_confirm"] == q.getOrDefault"password"
+      csrf -> callback do(input: string) -> bool:
+        # validate the CSRF token required for registration
+        return userSession.validateCSRF("/auth/register", input)
     do:
       # validation failed, set the flash message to notify
       # the user and redirect back to `/auth/register`
@@ -36,6 +48,8 @@ template postRegister* =
         userSession.notify("The password is not strong enough")
       elif fields.contains("password_confirm"):
         userSession.notify("The password confirmation does not match")
+      elif fields.contains("csrf"):
+        userSession.notify("Invalid CSRF token. Please refresh the page and try again.")
       else:
         userSession.notify(registrationMessage)
       go getAuthRegister # get redirected to `/auth/register`
@@ -43,7 +57,7 @@ template postRegister* =
     # emit `account.register` event to handle the
     # registration request. this event is spawned in a new thread
     # to avoid blocking the request.
-    event().emit("account.register", some(@[req.getFields[0][1], req.getFields[1][1]]))
+    event().emit("account.register", some(@[q["email"], q["password"]]))
 
     # notify the user that the account has been created
     # and a confirmation link has been sent to the given email address.

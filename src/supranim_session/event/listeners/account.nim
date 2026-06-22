@@ -111,8 +111,8 @@ listener "account.register":
       if anyUser.isEmpty() == false: return
 
       # otherwise, create a new user account and store it in the database.
-      let (pk, sk) = auth.boxKeys()         # X25519 keys (hex) required for E2EE features like encrypted notes, files, etc.
-      let (signPk, signSk) = auth.signKeys() # Ed25519 keys (hex) required for signing messages, generating TOTP secrets, etc.
+      let (pk, sk) = auth.boxKeys()           # X25519 keys (hex) required for E2EE features like encrypted notes, files, etc.
+      let (signPk, signSk) = auth.signKeys()  # Ed25519 keys (hex) required for signing messages, generating TOTP secrets, etc.
       # sign it with the user secret key to gen a unique totp secret for the user account
       let totpSecret = sign(signSk.secretKeyFromHex(), generateSalt(16).toHex())
       let userId = Models.table(Users).insert({
@@ -123,7 +123,7 @@ listener "account.register":
           "sk": sk,
           "sign_pk": signPk,
           "sign_sk": signSk,
-          "totp_secret": twofa.genTotpUri(totpSecret.toHex(), "MyApp", "MyCompany"),
+          # "totp_secret": twofa.genTotpUri(totpSecret.toHex(), "MyApp", "MyCompany"),
           "password": auth.hashPassword(fields[1]),
           "created_at": $(now())
         }).execGet()

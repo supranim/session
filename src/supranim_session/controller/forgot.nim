@@ -15,7 +15,7 @@ template getForgotPassword*(redirectHandlerSuccess: untyped, layout="base") =
     go redirectHandlerSuccess
   withSession do:
     render("auth.forgot", layout, local = &*{
-      "notifications": userSession.getNotifications(req.getUriPath).get(@[]),
+      "notifications": userSession.getNotifications(req.getUriPath),
       "csrf": userSession.genCSRF("/auth/forgot-password")
     })
 
@@ -85,7 +85,7 @@ template getResetPassword*(redirectHandlerSuccess: untyped, layout = "base") =
 
       render("auth.reset", layout, local = &*{
         "resetToken": reqToken,
-        "notifications": userSession.getNotifications(req.getUriPath).get(@[]),
+        "notifications": userSession.getNotifications(req.getUriPath),
         "csrf": userSession.genCSRF("/auth/reset-password")
       })
     else:

@@ -26,7 +26,7 @@ template postForgotPassword*(redirectHandlerSuccess: untyped) =
       # already loggedin, redirect to `/account`
       go redirectHandlerSuccess
 
-    bag req.getFields:
+    withBag req.getFields:
       # default error message for invalid emails
       email: tEmail"Email address is not valid"
       csrf -> callback do(input: string) -> bool:

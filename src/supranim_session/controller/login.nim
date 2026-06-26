@@ -33,7 +33,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
       # redirect to the account page
       go redirectHandlerSuccess # redirects to selected controller action
 
-    bag req.getFields:
+    withBag req.getFields:
       # validates the request fields
       # if the email address is not valid, notify the user
       # using a specific error message, otherwise use the

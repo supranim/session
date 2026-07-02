@@ -18,16 +18,25 @@ template getRegister*(layout = "base") =
     })
 
 const registrationMessage* = "Thanks for registration! If this is a new account, a confirmation link will be sent to your email address. If you lost access to your account, <a href='/auth/forgot-password'>reset your password here</a>."
-template postRegister* =
+template postRegister*(preHook, postHook: untyped = ()) =
   ## POST handle for registering a new user
   let q {.inject.} = req.getFieldsTable().get()
   withSession do:
     if unlikely(isAuth()):
       # already logged in, redirect to account page
       go getAccount
+    
+    # check if registration is enabled in the session config
     if not session().config.registration.enable:
       userSession.notify("Registration is currently disabled.")
       go getAuthLogin
+
+    # insert prehook code here
+    # this may contain additional logic that should be added before
+    # validating the input data
+    preHook
+
+    # validate the registration form fields
     withValidator req.getFields:
       email: tEmail""
       password: tPasswordStrength""
@@ -58,6 +67,9 @@ template postRegister* =
     # registration request. this event is spawned in a new thread
     # to avoid blocking the request.
     event().emit("account.register", some(@[q["email"], q["password"]]))
+
+    # insert posthook here
+    postHook
 
     # notify the user that the account has been created
     # and a confirmation link has been sent to the given email address.

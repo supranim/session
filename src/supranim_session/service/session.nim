@@ -12,6 +12,7 @@ import pkg/e2ee
 initService HttpSession[Singleton]:
   backend do:
     import std/[times, json, tables, hashes, strutils]
+    import pkg/threading/rwlock
     import pkg/supranim/support/[cookie, nanoid]
     export cookie
 
@@ -104,10 +105,10 @@ initService HttpSession[Singleton]:
           # The user id associated with the session. This is used to
           # identify the user associated with the session without having
           # to query the database for the session payload.
-        backend: CookiesTable = CookiesTable()
-          # A `CookiesTable` for holding backend cookies.
-        client: CookiesTable = CookiesTable()
-          # A public `CookiesTable` for holding client cookies that will be
+        backend: Table[string, Cookie]
+          # A table for holding backend cookies.
+        client: Table[string, Cookie]
+          # A public table for holding client cookies that will be
           # sent within the response.
         notifications: Table[string, seq[Notification]]
           # A table that holds flash bag notification messages.
@@ -143,14 +144,19 @@ initService HttpSession[Singleton]:
         sessionFileStorage
 
       HttpSession = object
+        rwlock: RwLock
         keypair: string
         nonce: string
           # A unique nonce used for encrypting and decrypting session
           # data when using file storage. This should be generated once and stored securely.
         storageType: SessionStorageType
           # The storage type for the sessions. This can be either `sessionDBStorage` or `sessionFileStorage`.
-        sessions: Sessions = Sessions()
+        sessions: Sessions
           # A table that holds all the active user sessions. The key is the session id.
+        staleMappings: Table[string, string]
+          # Maps stale cookie IDs to new session IDs, to prevent duplicate
+          # sessions from being created when the browser sends concurrent
+          # requests with the same stale cookie.
         config*: ConfigHttpSession
           # Configuration for the session management, including cookie settings
           # and authentication options.
@@ -161,25 +167,38 @@ initService HttpSession[Singleton]:
     proc session*(): ptr HttpSession {.inline.}
     proc initSavedSessions*(instance: ptr HttpSession)
 
-    proc newUserSession*(userData: JsonNode, reqPath: string): UserSessionObj =
+    proc newUserSession*(userData: JsonNode, reqPath: string, staleSsid: Option[string] = none(string)): UserSessionObj =
       ## Creates a new session object
       assert userData.kind == JObject
       var id: string
       let instance = session()
-      while true:
-        id = nanoid.generate(size = 42)
-        if not instance.sessions.hasKey(id): break
-      let createdAt = now()
-      result = UserSessionObj(
-        id: id,
-        created: createdAt,
-        lastAccess: createdAt,
-        csrfSecretKey: nanoid.generate(size = 32),
-        payload: userData
-      )
-      # result.backend["ssid"] = newCookie("ssid", $(userData), createdAt + 60.minutes)
-      result.client["ssid"] = newCookie("ssid", id)
-      instance.sessions[id] = result # store the user session
+      writeWith(instance[].rwlock):
+        # Check if another request already created a session for this stale cookie
+        if staleSsid.isSome:
+          let staleId = staleSsid.get()
+          if instance[].staleMappings.hasKey(staleId):
+            let resolvedId = instance[].staleMappings[staleId]
+            if instance.sessions.hasKey(resolvedId):
+              return instance.sessions[resolvedId]
+        while true:
+          id = nanoid.generate(size = 42)
+          if not instance.sessions.hasKey(id): break
+        let createdAt = now()
+        result = UserSessionObj(
+          id: id,
+          created: createdAt,
+          lastAccess: createdAt,
+          csrfSecretKey: nanoid.generate(size = 32),
+          payload: userData,
+          notifications: initTable[string, seq[Notification]](),
+          csrfTokens: initTable[CSRFFormIdentifier, string](),
+          client: initTable[string, Cookie](),
+          backend: initTable[string, Cookie]()
+        )
+        result.client["ssid"] = newCookie("ssid", id)
+        instance.sessions[id] = result
+        if staleSsid.isSome:
+          instance[].staleMappings[staleSsid.get()] = id
 
     proc addUserSessionWith(instance: ptr HttpSession,
           id: string, createdAt: DateTime, userData: JsonNode) =
@@ -190,7 +209,11 @@ initService HttpSession[Singleton]:
         created: createdAt,
         lastAccess: createdAt,
         csrfSecretKey: nanoid.generate(size = 32),
-        payload: userData
+        payload: userData,
+        notifications: initTable[string, seq[Notification]](),
+        csrfTokens: initTable[CSRFFormIdentifier, string](),
+        client: initTable[string, Cookie](),
+        backend: initTable[string, Cookie]()
       )
       userSession.client["ssid"] = newCookie("ssid", id)
       instance[].sessions[id] = userSession
@@ -222,10 +245,10 @@ initService HttpSession[Singleton]:
       ## Returns the current user session.
       let ssid = req.getClientId()
       if ssid.isSome:
-        let id = ssid.get() # the session id returned by the client
         let instance = session()
-        if instance.sessions.hasKey(ssid.get()):
-          return instance.sessions[ssid.get()]
+        readWith(instance[].rwlock):
+          if instance.sessions.hasKey(ssid.get()):
+            result = instance.sessions[ssid.get()]
 
     proc getId*(userSession: UserSessionObj): lent string =
       ## Returns the session id
@@ -237,12 +260,14 @@ initService HttpSession[Singleton]:
 
     proc initSessionWithHeaders*(req: var Request, res: var Response): UserSessionObj = 
       ## Initializes a new `UserSession` then adds a
-      ## `set-cookie` header to the next `res` Response. 
-      result = newUserSession(req.getClientData(), req.getUriPath())
-      let userSessionCookie: ref Cookie = result.client["ssid"]
-      if userSessionCookie != nil:
-        # Add `set-cookie` header to the response
-        res.addHeader("set-cookie", $userSessionCookie)
+      ## `set-cookie` header to the next `res` Response.
+      let staleSsid = req.getClientId()
+      # Clear stale cookie from browser
+      if staleSsid.isSome:
+        res.addHeader("set-cookie", "ssid=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict")
+      result = newUserSession(req.getClientData(), req.getUriPath(), staleSsid)
+      if likely(result.client.hasKey("ssid")):
+        res.addHeader("set-cookie", $result.client["ssid"])
       else:
         raise newException(HttpSessionError, "Could not create a new Session")
 
@@ -252,12 +277,13 @@ initService HttpSession[Singleton]:
       ## 
       ## This will delete the session cookie from backend and client
       let instance = session()
-      defer:
-        instance.sessions.del(userSession.id)
-      var userCookie: ref Cookie = userSession.client["ssid"]
-      assert userCookie != nil
+      assert userSession.client.hasKey("ssid")
+      var userCookie = userSession.client["ssid"]
       userCookie.expires()
+      userSession.client["ssid"] = userCookie
       res.addHeader("set-cookie", $userCookie)
+      writeWith(instance[].rwlock):
+        instance.sessions.del(userSession.id)
     
     proc checkPayload(userPayload, reqPayload: JsonNode): bool =
       # Checks if the session payload matches the request payload.
@@ -381,21 +407,25 @@ initService HttpSession[Singleton]:
       if userSession.`type` != sessionTypeRememberMe:
         return
       let instance = session()
-      var newId: string
-      while true:
-        newId = nanoid.generate(size = 42)
-        if not instance[].sessions.hasKey(newId): break
-      let oldId = userSession.id
-      userSession.id = newId
-      userSession.client["ssid"] = newCookie("ssid", newId,
-        expirationDate = some(userSession.created + instance[].config.expiration))
-      instance[].sessions.del(oldId)
-      instance[].sessions[newId] = userSession
+      writeWith(instance[].rwlock):
+        var newId: string
+        while true:
+          newId = nanoid.generate(size = 42)
+          if not instance[].sessions.hasKey(newId): break
+        let oldId = userSession.id
+        userSession.id = newId
+        userSession.client["ssid"] = newCookie("ssid", newId,
+          expirationDate = some(userSession.created + instance[].config.expiration))
+        instance[].sessions.del(oldId)
+        instance[].sessions[newId] = userSession
       res.addHeader("set-cookie", $userSession.client["ssid"])
 
     proc initSavedSessions*(instance: ptr HttpSession) =
       ## Initializes the HttpSession service with saved sessions
       ## from the database.
+      var tempRw = createRwLock()
+      copyMem(addr(instance[].rwlock), addr(tempRw), sizeof(RwLock))
+      zeroMem(addr(tempRw), sizeof(RwLock))
       if instance[].storageType == sessionDBStorage:
         withDBPool do:
           let anySessions = Models.table(UserSessions).selectAll().getAll()
@@ -454,15 +484,22 @@ initService HttpSession[Singleton]:
       ## 
       ## The generated token is stored in the `csrfTokens` table with the form identifier as the key.
       ## This allows for validating the token when the form is submitted.
-      result = toLowerAscii(sha512HmacHex(userSession.csrfSecretKey, nanoid.generate(size = 8)))
-      userSession.csrfTokens[id] = result
+      let instance = session()
+      writeWith(instance[].rwlock):
+        if userSession.csrfTokens.hasKey(id):
+          result = userSession.csrfTokens[id]
+        else:
+          result = toLowerAscii(sha512HmacHex(userSession.csrfSecretKey, nanoid.generate(size = 8)))
+          userSession.csrfTokens[id] = result
 
     proc validateCSRF*(userSession: UserSessionObj, id, clientToken: string): bool =
       ## Validates the CSRF token submitted by the client against the token stored in the session
       ## for the given form identifier.
-      if userSession.csrfTokens.hasKey(id) and userSession.csrfTokens[id] == clientToken:
-        userSession.csrfTokens.del(id) # not needed anymore
-        result = true
+      let instance = session()
+      writeWith(instance[].rwlock):
+        if userSession.csrfTokens.hasKey(id) and userSession.csrfTokens[id] == clientToken:
+          userSession.csrfTokens.del(id)
+          result = true
 
     #
     # Flash bag notifications
@@ -473,32 +510,26 @@ initService HttpSession[Singleton]:
       ## notification messages after a redirect.
       if userSession != nil:
         let path = if somePath.isSome: somePath.get() else: req.getUriPath()
-        let ssid = userSession.getId
         let instance = session()
-        if instance.sessions.hasKey(ssid):
-          if not instance.sessions[ssid].notifications.hasKey(path):
-            instance.sessions[ssid].notifications[path] = newSeq[Notification]()
-          instance.sessions[ssid].notifications[path].add(msg)
+        writeWith(instance[].rwlock):
+          if not userSession.notifications.hasKey(path):
+            userSession.notifications[path] = newSeq[Notification]()
+          userSession.notifications[path].add(msg)
 
     proc getSomeNotifications*(userSession: UserSessionObj, path: string): Option[seq[string]] =
       ## Returns available flash bag notifications.
       if userSession != nil:
-        let ssid = userSession.getId
         let instance = session()
-        if instance.sessions.hasKey(ssid):
-          if instance.sessions[ssid].notifications.hasKey(path):
-            defer:
-              instance.sessions[ssid].notifications.del(path)
-            return some(instance.sessions[ssid].notifications[path])
-      none(seq[string])
+        writeWith(instance[].rwlock):
+          if userSession.notifications.hasKey(path):
+            result = some(userSession.notifications[path])
+            userSession.notifications.del(path)
 
     proc getNotifications*(userSession: UserSessionObj, path: string): seq[string] =
       ## Returns available flash bag notifications.
       if userSession != nil:
-        let ssid = userSession.getId
         let instance = session()
-        if instance.sessions.hasKey(ssid):
-          if instance.sessions[ssid].notifications.hasKey(path):
-            defer:
-              instance.sessions[ssid].notifications.del(path)
-            return instance.sessions[ssid].notifications[path]
+        writeWith(instance[].rwlock):
+          if userSession.notifications.hasKey(path):
+            result = userSession.notifications[path]
+            userSession.notifications.del(path)

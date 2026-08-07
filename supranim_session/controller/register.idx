@@ -1,4 +1,4 @@
 nimTitle	register	supranim_session/controller/register.html	module supranim_session/controller/register		0
 nim	getRegister	supranim_session/controller/register.html#getRegister.t,string	template getRegister(layout = "base")		9
-nim	registrationMessage	supranim_session/controller/register.html#registrationMessage	const registrationMessage		17
-nim	postRegister	supranim_session/controller/register.html#postRegister.t	template postRegister()		18
+nim	registrationMessage	supranim_session/controller/register.html#registrationMessage	const registrationMessage		20
+nim	postRegister	supranim_session/controller/register.html#postRegister.t,untyped,untyped	template postRegister(preHook, postHook: untyped = ())		21

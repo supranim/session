@@ -7,7 +7,7 @@
 #   Released under the MIT License.
 
 import pkg/supranim/core/[services, paths]
-import pkg/e2ee
+import pkg/nimcypher
 
 initService HttpSession[Singleton]:
   backend do:

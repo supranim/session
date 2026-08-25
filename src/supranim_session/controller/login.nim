@@ -6,8 +6,12 @@
 #   
 #   Released under the MIT License.
 
-import pkg/e2ee
-from pkg/ozark/driver/psql import fromDBValue
+import pkg/nimcypher
+
+when defined supraDBMainSqlite:
+  import pkg/ozark/driver/sqlite
+else:
+  import pkg/ozark/driver/psql
 
 template getLogin*(redirectHandlerAlreadyLoggedin: untyped, layout="base") =
   ## renders authentication page
@@ -59,7 +63,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
         go getAuthLogin # redirects to `/auth/login`
 
       let user {.inject.} = collection.first()
-      if e2ee.verifyPassword(fields["password"], user.getPassword()):
+      if nimcypher.verifyPassword(fields["password"], user.getPassword()):
         if likely(fromDBValue[bool](user.getIsConfirmed())):
           # Checks if the user account is confirmed before
           # authenticating the user. set payload with user data

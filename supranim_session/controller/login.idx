@@ -1,5 +1,5 @@
 nimTitle	login	supranim_session/controller/login.html	module supranim_session/controller/login		0
-nim	getLogin	supranim_session/controller/login.html#getLogin.t,untyped,string	template getLogin(redirectHandlerAlreadyLoggedin: untyped; layout = "base")		12
-nim	authErrorMessage	supranim_session/controller/login.html#authErrorMessage	const authErrorMessage		26
-nim	postLogin	supranim_session/controller/login.html#postLogin.t,untyped	template postLogin(redirectHandlerSuccess: untyped)		28
-nim	getLogout	supranim_session/controller/login.html#getLogout.t,untyped	template getLogout(redirectHandlerSuccess: untyped)		94
+nim	getLogin	supranim_session/controller/login.html#getLogin.t,untyped,string	template getLogin(redirectHandlerAlreadyLoggedin: untyped; layout = "base")		16
+nim	authErrorMessage	supranim_session/controller/login.html#authErrorMessage	const authErrorMessage		30
+nim	postLogin	supranim_session/controller/login.html#postLogin.t,untyped	template postLogin(redirectHandlerSuccess: untyped)		32
+nim	getLogout	supranim_session/controller/login.html#getLogout.t,untyped	template getLogout(redirectHandlerSuccess: untyped)		98

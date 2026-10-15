@@ -82,7 +82,7 @@ template postLogin*(redirectHandlerSuccess: untyped) =
           # store the authenticated user session in the database
           saveSession(user.getId(), userSession)
           # regenerate session ID to prevent session fixation attacks
-          userSession.renewSession(res)
+          userSession.renewSession(req, res)
           go redirectHandlerSuccess # redirects to selected controller action
         else:
           # if the user is not confirmed, notify the user

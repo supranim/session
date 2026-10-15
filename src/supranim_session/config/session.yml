@@ -1,0 +1,44 @@
+# Default configuration for the Supranim HTTP session service.
+# Installed into the application's `config/` directory at compile time
+# by `initService` (copy-once: your edits are never overwritten).
+# Available in YAML, TOML or JSON; `App.config("session.*")` reads it
+# back regardless of format.
+#
+# Cookie `secure` accepts `auto` (default), `always` or `never`:
+# - `auto` emits `Secure` only when the effective request scheme is
+#   `https`. Plain `http://localhost` development omits it, which Safari
+#   requires (unlike Chrome/Firefox it does not treat `localhost` as a
+#   secure context and drops `Secure` cookies over plain HTTP).
+# - `always` / `never` force the attribute on / off.
+#
+# Behind a reverse proxy (e.g. nginx) set `trust_proxy: true` (default)
+# and forward the scheme:
+#   proxy_set_header X-Forwarded-Proto $scheme;
+# With `trust_proxy: false` proxy headers are ignored. Only enable it
+# when the headers come from a proxy you control.
+# Note `same_site: None` requires `secure` to actually be emitted,
+# otherwise browsers reject the cookie.
+
+expiration_hours: 720
+
+cookie:
+  name: ssid
+  domain: ""
+  path: /
+  http_only: true
+  same_site: Strict
+  secure: auto
+  trust_proxy: true
+
+authentication:
+  enable_multiple_sessions: true
+  enable_remember_me: true
+  enable_2fa: false
+  reset_password:
+    enable: true
+    require_same_device: false
+    require_same_ip: false
+
+registration:
+  enable: true
+  error_message_prevent_enumeration: true

@@ -14,6 +14,9 @@ initService HttpSession[Singleton]:
     import std/[times, json, tables, hashes, strutils]
     import pkg/threading/rwlock
     import pkg/supranim/support/[cookie, nanoid]
+    from std/cookies import SameSite
+    from pkg/supranim/core/application import appInstance, config,
+      getStr, getBool, getInt, isNil
     export cookie
 
     type
@@ -60,8 +63,27 @@ initService HttpSession[Singleton]:
         ## Configuration for the session cookie. This is used to set the cookie
         name: string = "ssid"
           # The name of the session cookie.
-        domain: string = "127.0.0.1"
-          # The domain of the session cookie.
+        domain: string = ""
+          # The domain of the session cookie. Empty means a host-only
+          # cookie (recommended for `localhost` / `127.0.0.1` development).
+        path: string = "/"
+          # The path of the session cookie.
+        httpOnly: bool = true
+          # Whether the cookie is inaccessible to client-side scripts.
+        sameSite: SameSite = SameSite.Strict
+          # The `SameSite` policy. Note `None` requires `Secure` to be
+          # emitted, otherwise browsers reject the cookie.
+        secure: CookieSecureMode = secureAuto
+          # When to emit the `Secure` attribute. `secureAuto` (default)
+          # emits it only when the effective request scheme is `https`,
+          # so plain `http://localhost` keeps working on Safari (which,
+          # unlike Chrome/Firefox, does not treat `localhost` as a secure
+          # context and drops `Secure` cookies over plain HTTP).
+        trustProxy: bool = true
+          # Honor `X-Forwarded-Proto` / `Forwarded` headers when deciding
+          # the effective scheme. Enable when running behind a reverse
+          # proxy that sets them (e.g. nginx with
+          # `proxy_set_header X-Forwarded-Proto $scheme;`).
         expiration: Option[DateTime] 
           # The expiration time of the session cookie.
           # if this is set to `none(DateTime)` the `ssid`
@@ -163,9 +185,92 @@ initService HttpSession[Singleton]:
 
       HttpSessionError* = object of CatchableError
 
+    proc parseSessionSameSite(s: string): SameSite =
+      ## Maps a `same_site` config value to `SameSite`, defaulting to `Strict`.
+      case s.strip().toLowerAscii()
+      of "lax": SameSite.Lax
+      of "none": SameSite.None
+      else: SameSite.Strict
+
+    proc loadSessionConfig*(): ConfigHttpSession =
+      ## Builds the session configuration from `config/session.*`
+      ## (`App.config("session.*")`), falling back to code defaults for
+      ## every missing file or key. Never raises: when the application
+      ## is not initialized yet (e.g. in tests) the defaults apply.
+      result = ConfigHttpSession(
+        expiration: initDuration(hours = 720),
+        session_cookie: ConfigHttpSessionCookie(),
+        authentication: ConfigHttpAuthentication(
+          enableMultipleSessions: true,
+          enableRememberMe: true,
+          enable_2fa: false,
+          reset_password: ConfigHttpAuthenticationResetPassword()
+        ),
+        registration: ConfigHttpRegistration(
+          enable: true,
+          error_message_prevent_enumeration: true
+        )
+      )
+      try:
+        let app = appInstance()
+        if system.isNil(app) or system.isNil(app.configs):
+          return
+        template overrideStr(key: string, dst: untyped) =
+          block:
+            let v = app.config(key)
+            if not v.isNil and v.getStr.len > 0:
+              dst = v.getStr
+        template overrideBool(key: string, dst: untyped) =
+          block:
+            let v = app.config(key)
+            if not v.isNil:
+              dst = v.getBool
+        var expirationHours = 720'i64
+        block:
+          let v = app.config("session.expiration_hours")
+          if not v.isNil:
+            expirationHours = v.getInt
+        result.expiration = initDuration(hours = expirationHours)
+        overrideStr("session.cookie.name", result.session_cookie.name)
+        overrideStr("session.cookie.domain", result.session_cookie.domain)
+        overrideStr("session.cookie.path", result.session_cookie.path)
+        overrideBool("session.cookie.http_only", result.session_cookie.httpOnly)
+        overrideBool("session.cookie.trust_proxy", result.session_cookie.trustProxy)
+        block:
+          let v = app.config("session.cookie.same_site")
+          if not v.isNil and v.getStr.len > 0:
+            result.session_cookie.sameSite = parseSessionSameSite(v.getStr)
+        block:
+          let v = app.config("session.cookie.secure")
+          if not v.isNil and v.getStr.len > 0:
+            result.session_cookie.secure = parseSecureMode(v.getStr)
+        overrideBool("session.authentication.enable_multiple_sessions",
+          result.authentication.enableMultipleSessions)
+        overrideBool("session.authentication.enable_remember_me",
+          result.authentication.enableRememberMe)
+        overrideBool("session.authentication.enable_2fa",
+          result.authentication.enable_2fa)
+        overrideBool("session.authentication.reset_password.enable",
+          result.authentication.reset_password.enable)
+        overrideBool("session.authentication.reset_password.require_same_device",
+          result.authentication.reset_password.require_same_device)
+        overrideBool("session.authentication.reset_password.require_same_ip",
+          result.authentication.reset_password.require_same_ip)
+        overrideBool("session.registration.enable",
+          result.registration.enable)
+        overrideBool("session.registration.error_message_prevent_enumeration",
+          result.registration.error_message_prevent_enumeration)
+      except CatchableError:
+        discard
+
     # forward declaration
     proc session*(): ptr HttpSession {.inline.}
     proc initSavedSessions*(instance: ptr HttpSession)
+
+    proc sessionCookieName*(): string =
+      ## Returns the configured session cookie name (`ssid` by default).
+      let n = session()[].config.session_cookie.name
+      if n.len > 0: n else: "ssid"
 
     proc newUserSession*(userData: JsonNode, reqPath: string, staleSsid: Option[string] = none(string)): UserSessionObj =
       ## Creates a new session object
@@ -195,7 +300,7 @@ initService HttpSession[Singleton]:
           client: initTable[string, Cookie](),
           backend: initTable[string, Cookie]()
         )
-        result.client["ssid"] = newCookie("ssid", id)
+        result.client[sessionCookieName()] = newCookie(sessionCookieName(), id)
         instance.sessions[id] = result
         if staleSsid.isSome:
           instance[].staleMappings[staleSsid.get()] = id
@@ -215,10 +320,11 @@ initService HttpSession[Singleton]:
         client: initTable[string, Cookie](),
         backend: initTable[string, Cookie]()
       )
-      userSession.client["ssid"] = newCookie("ssid", id)
+      userSession.client[sessionCookieName()] = newCookie(sessionCookieName(), id)
       instance[].sessions[id] = userSession
 
   client do:
+    import std/times
     import pkg/openparser/json
     
     when defined supraDBMainSqlite:
@@ -226,11 +332,36 @@ initService HttpSession[Singleton]:
     else:
       import pkg/ozark/driver/psql
 
-    from pkg/supranim/core/request import Request, getClientData, getUriPath
+    from pkg/supranim/core/request import Request, getClientData, getUriPath,
+      hasCookies, getCookies, newCookieForRequest
     from pkg/supranim/core/response import Response, addHeader
-    from pkg/supranim/controller import getClientId, getSessionCookie
+    from pkg/supranim/support/cookie import parseCookies
 
     import ../model/user
+
+    proc getSessionIdFromRequest*(req: var Request): Option[string] =
+      ## Returns the session id from the request's session cookie,
+      ## honoring the configured cookie name.
+      if req.hasCookies:
+        let jar = parseCookies(req.getCookies().get())
+        if not jar.isNil:
+          let n = sessionCookieName()
+          if jar.hasKey(n):
+            return some(jar[n].getValue())
+
+    proc buildSessionCookie*(req: var Request, id: string,
+        expirationDate: Option[DateTime] = none(DateTime)): Cookie =
+      ## Builds the session cookie honoring `config/session.*` and the
+      ## request's effective scheme: `Secure` is emitted per the
+      ## configured `secure` mode (`auto` by default), so Safari keeps
+      ## working over plain `http://localhost` while proxied HTTPS
+      ## traffic still gets `Secure`.
+      let c = session()[].config.session_cookie
+      req.newCookieForRequest(sessionCookieName(), id,
+        mode = c.secure, trustProxy = c.trustProxy,
+        expirationDate = expirationDate,
+        domain = c.domain, path = c.path,
+        httpOnly = c.httpOnly, sameSite = c.sameSite)
 
     proc session*(): ptr HttpSession {.inline.} =
       ## Returns the Singleton instance of HttpSession
@@ -238,12 +369,12 @@ initService HttpSession[Singleton]:
         proc(instance: ptr HttpSession) =
           {.gcsafe.}:
             initSavedSessions(instance)
-            instance[].config = ConfigHttpSession(#[init config with default settings]#)
+            instance[].config = loadSessionConfig()
       ) # `getHttpSessionInstance` auto generated by the service manager
   
     proc getUserSession*(req: var Request): UserSessionObj =
       ## Returns the current user session.
-      let ssid = req.getClientId()
+      let ssid = req.getSessionIdFromRequest()
       if ssid.isSome:
         let instance = session()
         readWith(instance[].rwlock):
@@ -260,14 +391,22 @@ initService HttpSession[Singleton]:
 
     proc initSessionWithHeaders*(req: var Request, res: var Response): UserSessionObj = 
       ## Initializes a new `UserSession` then adds a
-      ## `set-cookie` header to the next `res` Response.
-      let staleSsid = req.getClientId()
-      # Clear stale cookie from browser
+      ## `set-cookie` header to the next `res` Response. The cookie
+      ## attributes (including `Secure`) follow `config/session.*` and
+      ## the request's effective scheme.
+      let
+        staleSsid = req.getSessionIdFromRequest()
+        cookieName = sessionCookieName()
+      # Clear stale cookie from browser, mirroring the session cookie
+      # attributes so the browser actually drops it.
       if staleSsid.isSome:
-        res.addHeader("set-cookie", "ssid=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict")
+        var clearCookie = buildSessionCookie(req, "")
+        clearCookie.expires()
+        res.addHeader("set-cookie", $clearCookie)
       result = newUserSession(req.getClientData(), req.getUriPath(), staleSsid)
-      if likely(result.client.hasKey("ssid")):
-        res.addHeader("set-cookie", $result.client["ssid"])
+      if likely(result.client.hasKey(cookieName)):
+        result.client[cookieName] = buildSessionCookie(req, result.id)
+        res.addHeader("set-cookie", $result.client[cookieName])
       else:
         raise newException(HttpSessionError, "Could not create a new Session")
 
@@ -275,12 +414,16 @@ initService HttpSession[Singleton]:
       ## Deletes the session object and overwrites the
       ## `set-cookie` header with an expired cookie.
       ## 
-      ## This will delete the session cookie from backend and client
-      let instance = session()
-      assert userSession.client.hasKey("ssid")
-      var userCookie = userSession.client["ssid"]
+      ## This will delete the session cookie from backend and client.
+      ## The stored cookie attributes (including `Secure`) are preserved
+      ## so the browser matches and drops the exact cookie it holds.
+      let
+        instance = session()
+        name = sessionCookieName()
+      assert userSession.client.hasKey(name)
+      var userCookie = userSession.client[name]
       userCookie.expires()
-      userSession.client["ssid"] = userCookie
+      userSession.client[name] = userCookie
       res.addHeader("set-cookie", $userCookie)
       writeWith(instance[].rwlock):
         instance.sessions.del(userSession.id)
@@ -401,24 +544,29 @@ initService HttpSession[Singleton]:
       let instance = session()
       result = now() - userSession.created > instance[].config.expiration
 
-    proc renewSession*(userSession: UserSessionObj, res: var Response) =
+    proc renewSession*(userSession: UserSessionObj, req: var Request, res: var Response) =
       ## Regenerates the session ID for a remember-me session.
       ## This should be called after successful authentication to prevent session fixation.
+      ## The replacement cookie follows `config/session.*` and the request's
+      ## effective scheme (Safari-safe `Secure` handling).
       if userSession.`type` != sessionTypeRememberMe:
         return
       let instance = session()
+      let name = sessionCookieName()
+      var newId: string
       writeWith(instance[].rwlock):
-        var newId: string
         while true:
           newId = nanoid.generate(size = 42)
           if not instance[].sessions.hasKey(newId): break
+      let renewed = buildSessionCookie(req, newId,
+        expirationDate = some(userSession.created + instance[].config.expiration))
+      writeWith(instance[].rwlock):
         let oldId = userSession.id
         userSession.id = newId
-        userSession.client["ssid"] = newCookie("ssid", newId,
-          expirationDate = some(userSession.created + instance[].config.expiration))
+        userSession.client[name] = renewed
         instance[].sessions.del(oldId)
         instance[].sessions[newId] = userSession
-      res.addHeader("set-cookie", $userSession.client["ssid"])
+      res.addHeader("set-cookie", $userSession.client[name])
 
     proc initSavedSessions*(instance: ptr HttpSession) =
       ## Initializes the HttpSession service with saved sessions

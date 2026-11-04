@@ -79,10 +79,11 @@ template postLogin*(redirectHandlerSuccess: untyped) =
               go getAuthLogin # redirects to `/auth/login`
 
           userSession.updatePayload(req.getClientData())
-          # store the authenticated user session in the database
-          saveSession(user.getId(), userSession)
-          # regenerate session ID to prevent session fixation attacks
+          # regenerate session ID to prevent session fixation attacks,
+          # then store the authenticated session under the new ID so the
+          # database row matches the cookie the browser will present
           userSession.renewSession(req, res)
+          saveSession(user.getId(), userSession)
           go redirectHandlerSuccess # redirects to selected controller action
         else:
           # if the user is not confirmed, notify the user

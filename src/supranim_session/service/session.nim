@@ -10,7 +10,7 @@ import pkg/supranim/core/[services, paths]
 import pkg/nimcypher
 
 initService HttpSession[Singleton]:
-  backend do:
+  state do:
     import std/[times, json, tables, hashes, strutils]
     import pkg/threading/rwlock
     import pkg/supranim/support/[cookie, nanoid]
@@ -330,7 +330,7 @@ initService HttpSession[Singleton]:
       userSession.client[cookieName] = newCookie(cookieName, id)
       instance[].sessions[id] = userSession
 
-  client do:
+  api do:
     import std/times
     import pkg/openparser/json
     
